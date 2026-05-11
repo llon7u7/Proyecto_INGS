@@ -418,7 +418,7 @@ async function saveRecord() {
     const { data, error } = await clienteSupabase
       .from('registros_ine')
       .insert([recordToSave])
-      .select();
+      
 
     if (error) throw error;
 
