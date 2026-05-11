@@ -4,7 +4,7 @@ export default async function handler(req, res) {
   const { imageBase64, prompt } = req.body;
   
   // Tu llave de Groq (gsk_...)
-  const API_KEY = "process.env.GROQ_API_KEY"; 
+  const API_KEY = process.env.GROQ_API_KEY; 
 
   try {
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
