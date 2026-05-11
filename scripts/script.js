@@ -44,9 +44,18 @@ function saveCfg(cfg) {
 function getAdminHash() { return getCfg().adminHash || DEFAULT_ADMIN_HASH; }
 
 async function doLogin() {
-  const email = document.getElementById('loginUser').value.trim(); // Ahora pedimos email
+  // Asegúrate de que estos IDs ('loginUser' y 'loginPass') sean exactamente
+  // los mismos que tienes en los <input> de tu archivo index.html
+  const email = document.getElementById('loginUser').value.trim(); 
   const pass = document.getElementById('loginPass').value;
   
+  // NUEVO CANDADO: Revisar que no estén vacíos
+  if (email === "" || pass === "") {
+    document.getElementById('loginErr').textContent = "Por favor, ingresa tu correo y contraseña.";
+    document.getElementById('loginErr').style.display = 'block';
+    return; // Detiene la función aquí para no enviar basura a Supabase
+  }
+
   showStatus('Verificando credenciales...', 'loading');
 
   const { data, error } = await clienteSupabase.auth.signInWithPassword({
@@ -55,6 +64,7 @@ async function doLogin() {
   });
 
   if (error) {
+    // Si la contraseña está mal o el usuario no existe, mostrará el error
     document.getElementById('loginErr').textContent = "Error: " + error.message;
     document.getElementById('loginErr').style.display = 'block';
     hideStatus();
@@ -63,7 +73,6 @@ async function doLogin() {
     setTab('admin');
   }
 }
-
 async function isLoggedIn() {
   const { data } = await clienteSupabase.auth.getSession();
   return data.session !== null;
