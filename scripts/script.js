@@ -549,28 +549,53 @@ function resetAll() {
   document.getElementById('combinedBanner').style.display = 'none';
 }
 
+
+// ══════════════════════════════════════════
+//  CAPTURA MANUAL — mostrar formulario vacío
+// ══════════════════════════════════════════
+function enterManual() {
+  // Construir un objeto vacío con todas las claves de FIELD_LABELS
+  const empty = {};
+  Object.keys(FIELD_LABELS).forEach(k => { empty[k] = ''; });
+  empty.confianzaOCR     = 0;
+  empty.requiereRevision = true;  // sin OCR → revisión manual por defecto
+
+  currentData = null;  // se construirá en saveRecord desde los inputs
+
+  showExtracted(empty);
+
+  // Mostrar stepper en paso 1 pero no avanzar automáticamente
+  document.getElementById('emptyMsg').innerHTML =
+    'Rellena los campos manualmente<br>y presiona «Guardar registro».';
+}
 // ══════════════════════════════════════════
 //  GUARDAR EN SUPABASE (RF-05)
 // ══════════════════════════════════════════
 async function saveRecord() {
-  if (!currentData) return;
-  if (!state.frente.scanned) {
-    alert('Debes escanear al menos el frente de la INE.');
-    return;
+  // Permitir guardar tanto con OCR como con captura manual.
+  // Si no hubo OCR, construir currentData desde los campos editables.
+  const editedNow = getEditedData();
+  if (!currentData) {
+    // Caso: el usuario rellenó todo a mano sin escanear
+    currentData = {
+      ...editedNow,
+      confianzaOCR:     0,
+      requiereRevision: true   // sin OCR → marcar para revisión manual
+    };
   }
 
   showSideStatus('frente', 'Guardando en la base de datos...', 'loading');
 
-  const edited     = getEditedData();
+  const edited     = editedNow;           // ya lo tenemos
   const normalized = normalizeRecord(edited);
 
   try {
     // ── Valores seguros para campos NOT NULL ──────────────────────────────
-    const curpVal     = normalized.curp      || 'SIN-CURP';
-    const nombreVal   = normalized.nombre    || 'SIN-NOMBRE';
-    const claveVal    = (normalized.claveElector || normalized.clave_Elector || 'SIN-CLAVE').slice(0,18);
+    const curpVal     = normalized.curp      || '';
+    const nombreVal   = normalized.nombre    || '';
+    const claveVal    = (normalized.claveElector || normalized.clave_Elector || '').slice(0,18);
     const seccionVal  = parseInt(normalized.seccion) || 0;
-    // imagen_url NOT NULL: usamos frente; si no hay, placeholder vacío
+    // imagen_url NOT NULL: frente si existe, o cadena vacía
     const imagenVal   = state.frente.dataURL || '';
 
     // ── Mapeo exacto contra esquema de Supabase ───────────────────────────
@@ -682,6 +707,7 @@ async function loadAdminView() {
       codigoBarras:       "",
       // imagen_reverso_url: no existe en DB — se resuelve en viewRecord con || null
     }));
+
     renderStats();
     renderTable();
   } catch(err) {
