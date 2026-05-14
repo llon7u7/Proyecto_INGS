@@ -1,33 +1,46 @@
 // ══════════════════════════════════════════
 //  CONSTANTS & STATE
 // ══════════════════════════════════════════
-const CFG_KEY      = 'ine_cfg_v1';
-const SESSION_KEY  = 'ine_session';
-const ENCRYPT_PASS = 'INE_SCANNER_AES_SECRET_2024';
-const OCR_TIMEOUT_MS = 15000;
+const CFG_KEY            = 'ine_cfg_v1';
+const SESSION_KEY        = 'ine_session';
+const ENCRYPT_PASS       = 'INE_SCANNER_AES_SECRET_2024';
+const OCR_TIMEOUT_MS     = 15000;
 const CONFIDENCE_THRESHOLD = 85;
 
-// ── SUPABASE SETUP ──────
-// ── SUPABASE SETUP ──────
-const supabaseUrl = 'https://irshnqkotnquwawlohlj.supabase.co'; 
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlyc2hucWtvdG5xdXdhd2xvaGxqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyMDY0ODQsImV4cCI6MjA5Mzc4MjQ4NH0.KbJI-gfQYYwN6Sansc_pGiE4WRVDElCPkjh7aX0kxVs'; // (Tu llave larga)
-
-// 1. Creamos la conexión con un nombre distinto para que no choque
+// ── SUPABASE ─────────────────────────────
+const supabaseUrl = 'https://irshnqkotnquwawlohlj.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlyc2hucWtvdG5xdXdhd2xvaGxqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyMDY0ODQsImV4cCI6MjA5Mzc4MjQ4NH0.KbJI-gfQYYwN6Sansc_pGiE4WRVDElCPkjh7aX0kxVs';
 const clienteSupabase = window.supabase.createClient(supabaseUrl, supabaseKey);
-
 window.supabase = clienteSupabase;
 
 const DEFAULT_ADMIN_HASH = CryptoJS.SHA256('admin:admin123').toString();
 
-let currentImage   = null;
-let currentData    = null;
+// ── ESTADO GLOBAL ────────────────────────
+// Cada lado (frente / reverso) tiene su propio estado
+const state = {
+  frente: {
+    image: null,        // base64 sin prefijo
+    dataURL: null,      // dataURL completo para mostrar
+    data: null,         // datos extraídos por OCR
+    scanned: false
+  },
+  reverso: {
+    image: null,
+    dataURL: null,
+    data: null,         // sólo contiene folio + imagenReverso
+    scanned: false
+  }
+};
+
+let currentData    = null;  // datos combinados listos para guardar
 let allRecords     = [];
 let page           = 1;
 const PAGE_SIZE    = 10;
-let mediaStream    = null;
-let currentImageDataURL = null;
 
-// ── CONFIG (Solo para contraseña de Admin) ──
+// mediaStreams separados por lado
+const streams = { frente: null, reverso: null };
+
+// ── CONFIG ───────────────────────────────
 function getCfg() {
   try {
     const raw = localStorage.getItem(CFG_KEY);
@@ -36,68 +49,48 @@ function getCfg() {
   } catch { return {}; }
 }
 function saveCfg(cfg) {
-  const enc = CryptoJS.AES.encrypt(JSON.stringify(cfg), ENCRYPT_PASS).toString();
-  localStorage.setItem(CFG_KEY, enc);
+  localStorage.setItem(CFG_KEY,
+    CryptoJS.AES.encrypt(JSON.stringify(cfg), ENCRYPT_PASS).toString());
 }
 
-// ── AUTH ─────────────────────────────────
-function getAdminHash() { return getCfg().adminHash || DEFAULT_ADMIN_HASH; }
-
+// ── AUTH (Supabase) ──────────────────────
 async function doLogin() {
-  // Asegúrate de que estos IDs ('loginUser' y 'loginPass') sean exactamente
-  // los mismos que tienes en los <input> de tu archivo index.html
-  const email = document.getElementById('loginUser').value.trim(); 
-  const pass = document.getElementById('loginPass').value;
-  
-  // NUEVO CANDADO: Revisar que no estén vacíos
-  if (email === "" || pass === "") {
-    document.getElementById('loginErr').textContent = "Por favor, ingresa tu correo y contraseña.";
-    document.getElementById('loginErr').style.display = 'block';
-    return; // Detiene la función aquí para no enviar basura a Supabase
+  const email = document.getElementById('loginUser').value.trim();
+  const pass  = document.getElementById('loginPass').value;
+  if (!email || !pass) {
+    showLoginErr('Por favor ingresa tu correo y contraseña.');
+    return;
   }
-
-  showStatus('Verificando credenciales...', 'loading');
-
-  const { data, error } = await clienteSupabase.auth.signInWithPassword({
-    email: email,
-    password: pass,
-  });
-
+  showLoginErr('', false);
+  const { error } = await clienteSupabase.auth.signInWithPassword({ email, password: pass });
   if (error) {
-    // Si la contraseña está mal o el usuario no existe, mostrará el error
-    document.getElementById('loginErr').textContent = "Error: " + error.message;
-    document.getElementById('loginErr').style.display = 'block';
-    hideStatus();
+    showLoginErr('Error: ' + error.message);
   } else {
-    document.getElementById('loginErr').style.display = 'none';
     setTab('admin');
   }
+}
+function showLoginErr(msg, show = true) {
+  const el = document.getElementById('loginErr');
+  el.textContent = msg;
+  el.style.display = show ? 'block' : 'none';
 }
 async function isLoggedIn() {
   const { data } = await clienteSupabase.auth.getSession();
   return data.session !== null;
 }
-
 async function logout() {
   await clienteSupabase.auth.signOut();
   setTab('scanner');
 }
 
-
-
-// ── NAVIGATION ACTUALIZADA ───────────────────────────
+// ── NAVIGATION ───────────────────────────
 async function setTab(tab) {
-  ['viewScanner','viewLogin','viewAdmin'].forEach(id => {
-    document.getElementById(id).classList.remove('active');
-  });
-  
+  ['viewScanner','viewLogin','viewAdmin'].forEach(id =>
+    document.getElementById(id).classList.remove('active'));
   if (tab === 'scanner') {
     document.getElementById('viewScanner').classList.add('active');
   } else if (tab === 'admin') {
-    // 💡 AHORA SÍ ESPERA LA CONFIRMACIÓN REAL DE SUPABASE
-    const tieneSesion = await isLoggedIn(); 
-    
-    if (!tieneSesion) {
+    if (!await isLoggedIn()) {
       document.getElementById('viewLogin').classList.add('active');
     } else {
       document.getElementById('viewAdmin').classList.add('active');
@@ -108,97 +101,160 @@ async function setTab(tab) {
   }
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
 }
-// ── IMAGE INPUT ──────────────────────────
-function switchInputTab(which, btn) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('uploadSection').style.display = which === 'upload' ? 'block' : 'none';
-  document.getElementById('cameraSection').style.display = which === 'camera' ? 'block' : 'none';
-  if (which === 'camera') startCamera();
-  else stopCamera();
+
+// ══════════════════════════════════════════
+//  STEPPER — manejo de pasos
+// ══════════════════════════════════════════
+function goToStep(n) {
+  // Actualiza clases del stepper
+  const s1 = document.getElementById('step1');
+  const s2 = document.getElementById('step2');
+  const pF = document.getElementById('panelFrente');
+  const pR = document.getElementById('panelReverso');
+
+  if (n === 1) {
+    s1.className = 'step active';
+    s2.className = 'step';
+    pF.classList.add('active');
+    pR.classList.remove('active');
+  } else {
+    s1.className = 'step done';
+    s2.className = 'step active';
+    pF.classList.remove('active');
+    pR.classList.add('active');
+  }
 }
 
-function onFileSelect(e) {
+// Avanza automáticamente al paso 2 después de escanear frente con éxito
+function advanceToReverso() {
+  goToStep(2);
+  document.getElementById('emptyMsg').innerHTML =
+    'Frente escaneado ✓<br>Ahora sube el <strong>reverso</strong> para extraer el folio.';
+}
+
+// ══════════════════════════════════════════
+//  INPUT DE IMAGEN (compartido por ambos lados)
+// ══════════════════════════════════════════
+function switchInputTab(which, side, btn) {
+  const prefix = side.charAt(0).toUpperCase() + side.slice(1);
+  document.querySelectorAll(`#tabs${prefix} .tab`).forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(`uploadSection${prefix}`).style.display = which === 'upload' ? 'block' : 'none';
+  document.getElementById(`cameraSection${prefix}`).style.display = which === 'camera' ? 'block' : 'none';
+  if (which === 'camera') startCamera(side);
+  else stopCamera(side);
+}
+
+function onFileSelect(e, side) {
   const file = e.target.files[0];
   if (!file) return;
   if (!['image/jpeg','image/png','image/heic','image/heif'].includes(file.type)) {
-    showStatus('Solo se permiten archivos JPG o PNG.', 'error');
+    showSideStatus(side, 'Solo se permiten archivos JPG o PNG.', 'error');
     return;
   }
   const reader = new FileReader();
   reader.onload = ev => {
-    currentImage = ev.target.result.split(',')[1];
-    currentImageDataURL = ev.target.result;
-    showPreview(ev.target.result);
+    state[side].image  = ev.target.result.split(',')[1];
+    state[side].dataURL = ev.target.result;
+    showPreview(side, ev.target.result);
   };
   reader.readAsDataURL(file);
 }
 
-function showPreview(src) {
-  const img = document.getElementById('previewImg');
-  img.src = src; img.style.display = 'block';
-  document.getElementById('btnScan').disabled = false;
-  document.getElementById('btnClear').style.display = 'inline-flex';
+function showPreview(side, src) {
+  const prefix = side.charAt(0).toUpperCase() + side.slice(1);
+  const img = document.getElementById(`previewImg${prefix}`);
+  img.src = src;
+  img.style.display = 'block';
+  document.getElementById(`btnScan${prefix}`).disabled = false;
+  document.getElementById(`btnClear${prefix}`).style.display = 'inline-flex';
 }
 
-function clearImage() {
-  currentImage = null; currentData = null; currentImageDataURL = null;
-  document.getElementById('previewImg').style.display = 'none';
-  document.getElementById('btnScan').disabled = true;
-  document.getElementById('btnClear').style.display = 'none';
-  document.getElementById('fileInput').value = '';
-  hideStatus();
-  document.getElementById('extractedData').style.display = 'none';
-  document.getElementById('emptyExtracted').style.display = 'block';
-}
+function clearSide(side) {
+  const prefix = side.charAt(0).toUpperCase() + side.slice(1);
+  state[side].image  = null;
+  state[side].dataURL = null;
+  state[side].data   = null;
+  state[side].scanned = false;
+  const img = document.getElementById(`previewImg${prefix}`);
+  img.style.display = 'none';
+  img.src = '';
+  document.getElementById(`btnScan${prefix}`).disabled = true;
+  document.getElementById(`btnClear${prefix}`).style.display = 'none';
+  document.getElementById(`fileInput${prefix}`).value = '';
+  hideSideStatus(side);
 
-// ── DRAG & DROP ──────────────────────────
-const dz = document.getElementById('dropZone');
-dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
-dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
-dz.addEventListener('drop', e => {
-  e.preventDefault(); dz.classList.remove('dragover');
-  const f = e.dataTransfer.files[0];
-  if (f && f.type.startsWith('image/')) {
-    const r = new FileReader();
-    r.onload = ev => {
-      currentImage = ev.target.result.split(',')[1];
-      currentImageDataURL = ev.target.result;
-      showPreview(ev.target.result);
-    };
-    r.readAsDataURL(f);
+  // Si limpiamos frente, reseteamos todo
+  if (side === 'frente') {
+    clearSide('reverso');
+    currentData = null;
+    document.getElementById('extractedData').style.display = 'none';
+    document.getElementById('emptyExtracted').style.display = 'block';
+    document.getElementById('emptyMsg').innerHTML =
+      'Sube el <strong>frente</strong> de la INE<br>y presiona «Escanear frente» para comenzar.';
+    goToStep(1);
   }
+}
+
+// ── Drag & Drop (frente y reverso) ───────
+['Frente','Reverso'].forEach(P => {
+  const side = P.toLowerCase();
+  const dz = document.getElementById(`dropZone${P}`);
+  if (!dz) return;
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f && f.type.startsWith('image/')) {
+      const r = new FileReader();
+      r.onload = ev => {
+        state[side].image  = ev.target.result.split(',')[1];
+        state[side].dataURL = ev.target.result;
+        showPreview(side, ev.target.result);
+      };
+      r.readAsDataURL(f);
+    }
+  });
 });
 
-// ── CAMERA ───────────────────────────────
-async function startCamera() {
+// ── CÁMARA ───────────────────────────────
+async function startCamera(side) {
+  const prefix = side.charAt(0).toUpperCase() + side.slice(1);
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    document.getElementById('video').srcObject = mediaStream;
+    streams[side] = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    document.getElementById(`video${prefix}`).srcObject = streams[side];
   } catch(err) {
-    showStatus('No se pudo acceder a la cámara: ' + err.message, 'error');
+    showSideStatus(side, 'No se pudo acceder a la cámara: ' + err.message, 'error');
   }
 }
-function stopCamera() {
-  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+function stopCamera(side) {
+  if (streams[side]) {
+    streams[side].getTracks().forEach(t => t.stop());
+    streams[side] = null;
+  }
 }
-function capturePhoto() {
-  const video = document.getElementById('video');
-  const canvas = document.getElementById('captureCanvas');
-  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+function capturePhoto(side) {
+  const prefix = side.charAt(0).toUpperCase() + side.slice(1);
+  const video  = document.getElementById(`video${prefix}`);
+  const canvas = document.getElementById(`captureCanvas${prefix}`);
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
   canvas.getContext('2d').drawImage(video, 0, 0);
   const dataURL = canvas.toDataURL('image/jpeg', 0.9);
-  currentImage = dataURL.split(',')[1];
-  currentImageDataURL = dataURL;
-  showPreview(dataURL);
-  stopCamera();
-  document.getElementById('cameraSection').style.display = 'none';
-  document.getElementById('uploadSection').style.display = 'block';
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab')[0].classList.add('active');
+  state[side].image  = dataURL.split(',')[1];
+  state[side].dataURL = dataURL;
+  showPreview(side, dataURL);
+  stopCamera(side);
+  document.getElementById(`cameraSection${prefix}`).style.display = 'none';
+  document.getElementById(`uploadSection${prefix}`).style.display = 'block';
+  document.querySelectorAll(`#tabs${prefix} .tab`).forEach(t => t.classList.remove('active'));
+  document.querySelectorAll(`#tabs${prefix} .tab`)[0].classList.add('active');
 }
 
-// ── NORMALIZACIÓN DE DATOS ────────
+// ══════════════════════════════════════════
+//  NORMALIZACIÓN (RF-03)
+// ══════════════════════════════════════════
 function normalizeText(str) {
   if (!str) return '';
   return str.toUpperCase()
@@ -206,58 +262,49 @@ function normalizeText(str) {
     .replace(/\s+/g, ' ')
     .trim();
 }
-
 function normalizeRecord(data) {
-  const normalized = {};
+  const out = {};
   for (const key of Object.keys(data)) {
     const val = data[key];
     if (key === 'seccion') {
-      normalized[key] = String(val || '').replace(/\D/g, '').slice(0, 4);
-    } else if (key === 'curp' || key === 'claveElector') {
-      normalized[key] = String(val || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 18);
+      out[key] = String(val || '').replace(/\D/g, '').slice(0, 4);
+    } else if (key === 'curp' || key === 'claveElector' || key === 'clave_Elector') {
+      out[key] = String(val || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 18);
     } else {
-      normalized[key] = normalizeText(String(val || ''));
+      out[key] = normalizeText(String(val || ''));
     }
   }
-  return normalized;
+  return out;
 }
 
+// ── CÁLCULO DE CONFIANZA (RF-04) ─────────
 function calcConfidence(data) {
-  const criticalFields = ['nombre','apellidoPaterno','curp','claveElector','seccion','estado','domicilio'];
-  const filledCritical = criticalFields.filter(f => data[f] && data[f].trim().length > 0).length;
-
-  let formatScore = 100;
-  const curp = data.curp || '';
-  const clave = data.claveElector || '';
-  const seccion = data.seccion || '';
-
-  if (curp.length > 0 && !/^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9]{2}$/.test(curp)) formatScore -= 20;
-  if (clave.length > 0 && clave.length !== 18) formatScore -= 15;
-  if (seccion.length > 0 && !/^\d{4}$/.test(seccion)) formatScore -= 10;
-
-  const fieldScore = (filledCritical / criticalFields.length) * 100;
-  const confidence = Math.round((fieldScore * 0.6) + (formatScore * 0.4));
-  return Math.min(100, Math.max(0, confidence));
+  const critical = ['nombre','apellidoPaterno','curp','claveElector','seccion','estado','domicilio'];
+  const filled   = critical.filter(f => data[f] && data[f].trim().length > 0).length;
+  let fmt = 100;
+  const curp  = data.curp  || '';
+  const clave = data.claveElector || data.clave_Elector || '';
+  const sec   = data.seccion || '';
+  if (curp.length  > 0 && !/^[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[A-Z0-9]{2}$/.test(curp))  fmt -= 20;
+  if (clave.length > 0 && clave.length !== 18) fmt -= 15;
+  if (sec.length   > 0 && !/^\d{4}$/.test(sec)) fmt -= 10;
+  return Math.min(100, Math.max(0, Math.round((filled / critical.length * 100) * 0.6 + fmt * 0.4)));
 }
 
+// ── FETCH CON TIMEOUT (RNF-01) ───────────
 function fetchWithTimeout(url, options, ms) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { ...options, signal: ctrl.signal }).finally(() => clearTimeout(timer));
 }
 
-// ── RF-02: PROCESAMIENTO OCR (GROK VIA VERCEL) ─────────────
-async function scanINE() {
-  if (!currentImage) return;
+// ══════════════════════════════════════════
+//  PROMPTS OCR
+// ══════════════════════════════════════════
+const PROMPT_FRENTE = `Eres un sistema OCR especializado en credenciales INE/IFE de México.
+Analiza el FRENTE de la credencial y extrae TODOS los datos visibles.
+Responde ÚNICAMENTE con un objeto JSON válido, sin markdown ni texto extra.
 
-  document.getElementById('btnScan').disabled = true;
-  showStatus('Analizando credencial con Grok (IA)…', 'loading');
-
-  const prompt = `Eres un sistema OCR especializado en credenciales INE/IFE de México.
-Analiza la imagen con máxima precisión y extrae TODOS los datos visibles.
-Responde ÚNICAMENTE con un objeto JSON válido, sin markdown, sin texto adicional.
-
-Formato exacto requerido:
 {
   "nombre": "",
   "apellidoPaterno": "",
@@ -269,7 +316,6 @@ Formato exacto requerido:
   "estado": "",
   "municipio": "",
   "seccion": "",
-  "folio": "",
   "vigencia": "",
   "domicilio": "",
   "anioRegistro": "",
@@ -277,12 +323,44 @@ Formato exacto requerido:
 }
 
 Reglas:
-- "confianzaOCR": número del 0 al 100 indicando qué tan claramente pudiste leer los datos.
-- "curp" y "claveElector": exactamente 18 caracteres alfanuméricos.
-- "seccion": solo dígitos numéricos.
-- "sexo": "H" para hombre, "M" para mujer.
-- Si un campo no es visible, deja la cadena vacía "".
-- Responde ÚNICAMENTE con el objeto JSON, sin bloque de código (\`\`\`).`;
+- "confianzaOCR": 0-100 según claridad de la imagen.
+- "curp" y "clave_Elector": exactamente 18 caracteres alfanuméricos si visibles.
+- "seccion": solo dígitos (hasta 4).
+- "sexo": "H" hombre, "M" mujer.
+- Campos no visibles: cadena vacía "".
+- Solo el JSON, sin bloques de código.`;
+
+const PROMPT_REVERSO = `Eres un sistema OCR especializado en credenciales INE/IFE de México.
+Analiza el REVERSO de la credencial. Tu objetivo principal es extraer el FOLIO.
+Responde ÚNICAMENTE con un objeto JSON válido, sin markdown ni texto extra.
+
+{
+  "folio": "",
+  "codigoBarras": "",
+  "emision": "",
+  "confianzaOCR": 0
+}
+
+Reglas:
+- "folio": número de folio impreso en el reverso (típicamente alfanumérico, cerca del código de barras o en la parte superior).
+- "codigoBarras": texto del código de barras si es legible.
+- "emision": año o fecha de emisión si aparece en el reverso.
+- "confianzaOCR": 0-100 según claridad.
+- Solo el JSON, sin bloques de código.`;
+
+// ══════════════════════════════════════════
+//  ESCANEAR UN LADO (frente o reverso)
+// ══════════════════════════════════════════
+async function scanSide(side) {
+  if (!state[side].image) return;
+  const prefix = side.charAt(0).toUpperCase() + side.slice(1);
+  const btn    = document.getElementById(`btnScan${prefix}`);
+  btn.disabled = true;
+
+  const label  = side === 'frente' ? 'frente' : 'reverso';
+  showSideStatus(side, `Analizando ${label} con Grok (IA)…`, 'loading');
+
+  const prompt = side === 'frente' ? PROMPT_FRENTE : PROMPT_REVERSO;
 
   try {
     const res = await fetchWithTimeout(
@@ -290,7 +368,7 @@ Reglas:
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: currentImage, prompt: prompt })
+        body: JSON.stringify({ imageBase64: state[side].image, prompt })
       },
       OCR_TIMEOUT_MS
     );
@@ -300,71 +378,154 @@ Reglas:
       throw new Error(err.error?.message || err.error || 'Error en el servidor (' + res.status + ')');
     }
 
-    const data = await res.json();
-    const text = data.choices?.[0]?.message?.content || '';
-    const clean = text.replace(/```json|```/g, '').trim();
+    const data    = await res.json();
+    const text    = data.choices?.[0]?.message?.content || '';
+    const clean   = text.replace(/```json|```/g, '').trim();
     const rawData = JSON.parse(clean);
 
-    const normalizedData = normalizeRecord(rawData);
-    const apiConfidence = parseInt(rawData.confianzaOCR) || 0;
-    const calcConfidenceScore = calcConfidence(normalizedData);
-    
-    const finalConfidence = Math.min(apiConfidence || calcConfidenceScore, calcConfidenceScore);
-    normalizedData.confianzaOCR = finalConfidence;
-    normalizedData.requiereRevision = finalConfidence < CONFIDENCE_THRESHOLD;
+    const normalized   = normalizeRecord(rawData);
+    const apiConf      = parseInt(rawData.confianzaOCR) || 0;
+    const calcConf     = calcConfidence(normalized);
+    const finalConf    = Math.min(apiConf || calcConf, calcConf);
 
-    currentData = normalizedData;
-    showExtracted(currentData);
+    normalized.confianzaOCR     = finalConf;
+    normalized.requiereRevision = finalConf < CONFIDENCE_THRESHOLD;
 
-    if (normalizedData.requiereRevision) {
-      showStatus(`⚠️ Confianza OCR: ${finalConfidence}% — Registro marcado para REVISIÓN MANUAL`, 'warn');
+    state[side].data    = normalized;
+    state[side].scanned = true;
+
+    if (side === 'frente') {
+      // Mostrar resultados parciales del frente y avanzar al paso 2
+      mergeAndShowData();
+      showSideStatus(side,
+        `✓ Frente escaneado · Confianza: ${finalConf}% · Ahora escanea el reverso para el folio`,
+        finalConf < CONFIDENCE_THRESHOLD ? 'warn' : 'success');
+      advanceToReverso();
     } else {
-      showStatus(`✓ Datos extraídos correctamente · Confianza: ${finalConfidence}%`, 'success');
+      // Reverso: combinar folio con datos del frente
+      mergeAndShowData();
+      const folio = normalized.folio || '(no detectado)';
+      showSideStatus(side,
+        `✓ Reverso escaneado · Folio: ${folio} · Confianza: ${finalConf}%`,
+        finalConf < CONFIDENCE_THRESHOLD ? 'warn' : 'success');
+      // Marcar paso 2 como listo
+      document.getElementById('step2').className = 'step done';
     }
 
   } catch(err) {
-    if (err.name === 'AbortError') {
-      showStatus('⏱ Tiempo de espera agotado. Intenta con una imagen de menor peso.', 'error');
-    } else {
-      showStatus('Error: ' + err.message, 'error');
-    }
+    const msg = err.name === 'AbortError'
+      ? '⏱ Tiempo agotado. Intenta con una imagen más clara o de menor peso.'
+      : 'Error: ' + err.message;
+    showSideStatus(side, msg, 'error');
   } finally {
-    document.getElementById('btnScan').disabled = false;
+    btn.disabled = false;
   }
 }
 
+// ── Omitir reverso ────────────────────────
+function skipReverso() {
+  if (!state.frente.scanned) {
+    alert('Primero escanea el frente de la INE.');
+    return;
+  }
+  state.reverso.data = { folio: '', codigoBarras: '', emision: '', confianzaOCR: 0 };
+  state.reverso.scanned = false; // no escaneado, omitido
+  mergeAndShowData();
+  document.getElementById('step2').className = 'step done';
+  showSideStatus('reverso', 'Reverso omitido. El folio quedará vacío.', 'warn');
+}
+
+// ══════════════════════════════════════════
+//  COMBINAR DATOS FRENTE + REVERSO
+// ══════════════════════════════════════════
+function mergeAndShowData() {
+  const f = state.frente.data || {};
+  const r = state.reverso.data || {};
+
+  // Combinar: reverso aporta folio, codigoBarras, emision
+  const combined = {
+    nombre:          f.nombre          || '',
+    apellidoPaterno: f.apellidoPaterno  || '',
+    apellidoMaterno: f.apellidoMaterno  || '',
+    curp:            f.curp             || '',
+    claveElector:    f.clave_Elector    || f.claveElector || '',
+    fechaNacimiento: f.fecha_Nacimiento || f.fechaNacimiento || '',
+    sexo:            f.sexo             || '',
+    estado:          f.estado           || '',
+    municipio:       f.municipio        || '',
+    seccion:         f.seccion          || '',
+    folio:           r.folio            || f.folio || '', // Reverso tiene prioridad
+    codigoBarras:    r.codigoBarras     || '',
+    vigencia:        f.vigencia         || '',
+    domicilio:       f.domicilio        || '',
+    anioRegistro:    f.anioRegistro     || r.emision || '',
+    confianzaOCR:    f.confianzaOCR     || 0,
+    requiereRevision: f.requiereRevision || false,
+  };
+
+  currentData = combined;
+  showExtracted(combined);
+
+  // Mostrar banner de combinación solo si ambas caras escaneadas
+  const banner = document.getElementById('combinedBanner');
+  if (state.frente.scanned && (state.reverso.scanned || state.reverso.data)) {
+    banner.style.display = 'flex';
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+// ══════════════════════════════════════════
+//  MOSTRAR DATOS EXTRAÍDOS
+// ══════════════════════════════════════════
 const FIELD_LABELS = {
-  nombre: 'Nombre(s)', apellidoPaterno: 'Apellido paterno', apellidoMaterno: 'Apellido materno',
-  curp: 'CURP', claveElector: 'Clave de elector', fechaNacimiento: 'Fecha de nacimiento',
-  sexo: 'Sexo', estado: 'Estado', municipio: 'Municipio', seccion: 'Sección',
-  folio: 'Folio', vigencia: 'Vigencia', domicilio: 'Domicilio', anioRegistro: 'Año registro'
+  nombre:          'Nombre(s)',
+  apellidoPaterno: 'Apellido paterno',
+  apellidoMaterno: 'Apellido materno',
+  curp:            'CURP',
+  claveElector:    'Clave de elector',
+  fechaNacimiento: 'Fecha de nacimiento',
+  sexo:            'Sexo',
+  estado:          'Estado',
+  municipio:       'Municipio',
+  seccion:         'Sección',
+  folio:           'Folio',           // ← del reverso
+  codigoBarras:    'Código de barras', // ← del reverso
+  vigencia:        'Vigencia',
+  domicilio:       'Domicilio',
+  anioRegistro:    'Año registro'
 };
 
 function showExtracted(data) {
-  const grid = document.getElementById('dataGrid');
-  grid.innerHTML = '';
+  const grid  = document.getElementById('dataGrid');
+  const conf  = data.confianzaOCR || 0;
+  const rev   = data.requiereRevision;
+  const color = conf >= 85 ? '#6ee7b7' : conf >= 60 ? '#fbbf24' : '#fca5a5';
 
-  const conf = data.confianzaOCR || 0;
-  const revFlag = data.requiereRevision;
-  const confColor = conf >= 85 ? '#6ee7b7' : conf >= 60 ? '#fbbf24' : '#fca5a5';
-  grid.innerHTML += `
-    <div class="data-item confidence-card" style="grid-column:1/-1; border-color:${confColor}33; background:${confColor}0d;">
+  grid.innerHTML = `
+    <div class="data-item confidence-card"
+      style="grid-column:1/-1;border-color:${color}33;background:${color}0d;">
       <div class="data-label">Índice de confianza OCR · RF-04</div>
-      <div style="display:flex; align-items:center; gap:12px; margin-top:6px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-top:6px;">
         <div class="confidence-bar-bg">
-          <div class="confidence-bar-fill" style="width:${conf}%; background:${confColor};"></div>
+          <div class="confidence-bar-fill" style="width:${conf}%;background:${color};"></div>
         </div>
-        <span style="font-size:1rem; font-weight:700; color:${confColor}; min-width:42px;">${conf}%</span>
-        ${revFlag ? `<span class="revision-badge">⚠ REVISIÓN MANUAL</span>` : `<span class="ok-badge">✓ Confianza aceptable</span>`}
+        <span style="font-size:1rem;font-weight:700;color:${color};min-width:42px;">${conf}%</span>
+        ${rev
+          ? '<span class="revision-badge">⚠ REVISIÓN MANUAL</span>'
+          : '<span class="ok-badge">✓ Confianza aceptable</span>'}
       </div>
     </div>`;
 
   Object.entries(FIELD_LABELS).forEach(([key, label]) => {
-    const val = data[key] || '';
+    const val  = data[key] || '';
+    // Destacar visualmente el folio (viene del reverso)
+    const extra = (key === 'folio' || key === 'codigoBarras') ? ' folio-highlight' : '';
     grid.innerHTML += `
-      <div class="data-item">
-        <div class="data-label">${label}</div>
-        <input class="data-value editable" data-key="${key}" value="${escapeHtml(val)}" placeholder="—">
+      <div class="data-item${extra}">
+        <div class="data-label">${label}${key === 'folio' ? ' 🔁' : ''}</div>
+        <input class="data-value editable" data-key="${key}"
+          value="${escapeHtml(val)}" placeholder="—">
       </div>`;
   });
 
@@ -380,85 +541,111 @@ function getEditedData() {
   return data;
 }
 
-function resetExtracted() { clearImage(); }
+// Reset completo
+function resetAll() {
+  clearSide('frente'); // clearSide('frente') ya limpia reverso en cadena
+  currentData = null;
+  goToStep(1);
+  document.getElementById('combinedBanner').style.display = 'none';
+}
 
-
-// ── GUARDAR EN SUPABASE ──────
-// ── GUARDAR EN SUPABASE ───────────
+// ══════════════════════════════════════════
+//  GUARDAR EN SUPABASE (RF-05)
+// ══════════════════════════════════════════
 async function saveRecord() {
   if (!currentData) return;
-  
-  showStatus('Guardando en la base de datos...', 'loading');
-  const edited = getEditedData();
+  if (!state.frente.scanned) {
+    alert('Debes escanear al menos el frente de la INE.');
+    return;
+  }
+
+  showSideStatus('frente', 'Guardando en la base de datos...', 'loading');
+
+  const edited     = getEditedData();
   const normalized = normalizeRecord(edited);
 
   try {
-    // Aquí hacemos el "mapeo" exacto para tu base de datos
     const recordToSave = {
-      nombre: normalized.nombre,
-      apellidoPaterno: normalized.apellidoPaterno, 
-      apellidoMaterno: normalized.apellidoMaterno, 
-      curp: normalized.curp,
-      clave_elector: normalized.claveElector,      // DB usa guion bajo
-      fechaNacimiento: normalized.fechaNacimiento, 
-      sexo: normalized.sexo,
-      estado: normalized.estado,
-      municipio: normalized.municipio,
-      seccion: parseInt(normalized.seccion) || null, // DB espera un número (int4)
-      folio: normalized.folio,
-      vigencia: normalized.vigencia,
-      direccion: normalized.domicilio,             // DB le llama 'direccion'
-      anioRegistro: normalized.anioRegistro,
-      confianza_ocr: currentData.confianzaOCR || 0, // DB usa guion bajo
-      requiere_revision: currentData.requiereRevision || false, // DB usa guion bajo
-      imagen_url: currentImageDataURL ? currentImageDataURL : null
+      nombre:            normalized.nombre,
+      apellidoPaterno:   normalized.apellidoPaterno,
+      apellidoMaterno:   normalized.apellidoMaterno,
+      curp:              normalized.curp,
+      clave_elector:     normalized.claveElector,
+      fechaNacimiento:   normalized.fechaNacimiento,
+      sexo:              normalized.sexo,
+      estado:            normalized.estado,
+      municipio:         normalized.municipio,
+      seccion:           parseInt(normalized.seccion) || null,
+      folio:             normalized.folio,            // ← del reverso
+      codigo_barras:     normalized.codigoBarras,     // ← del reverso
+      vigencia:          normalized.vigencia,
+      direccion:         normalized.domicilio,
+      anioRegistro:      normalized.anioRegistro,
+      confianza_ocr:     currentData.confianzaOCR     || 0,
+      requiere_revision: currentData.requiereRevision || false,
+      // RF-08: guardar ambas imágenes
+      imagen_url:         state.frente.dataURL  || null,
+      imagen_reverso_url: state.reverso.dataURL || null,
     };
 
-    // Usamos clienteSupabase, que es como lo definiste arriba en tu script
-    const { data, error } = await clienteSupabase
+    const { error } = await clienteSupabase
       .from('registros_ine')
-      .insert([recordToSave])
-      
+      .insert([recordToSave]);
 
     if (error) throw error;
 
-    showStatus('✓ Registro guardado en la nube exitosamente', 'success');
-    setTimeout(() => { clearImage(); hideStatus(); }, 2500);
+    showSideStatus('frente', '✓ Registro guardado en la nube con folio incluido', 'success');
+    setTimeout(() => { resetAll(); hideSideStatus('frente'); }, 2500);
 
-  } catch (err) {
-    console.error("Error Supabase:", err);
-    showStatus('Error al guardar en base de datos: ' + err.message, 'error');
+  } catch(err) {
+    console.error('Error Supabase:', err);
+    showSideStatus('frente', 'Error al guardar: ' + err.message, 'error');
   }
 }
-// ── STATUS BAR ────────────────────────────
-function showStatus(msg, type) {
-  const bar = document.getElementById('statusBar');
+
+// ══════════════════════════════════════════
+//  STATUS BARS (una por lado)
+// ══════════════════════════════════════════
+function showSideStatus(side, msg, type) {
+  const prefix = side.charAt(0).toUpperCase() + side.slice(1);
+  const bar    = document.getElementById(`statusBar${prefix}`);
+  if (!bar) return;
   bar.style.display = 'flex';
-  const types = { loading:'status-loading', success:'status-success', error:'status-error', warn:'status-warn' };
-  bar.className = 'status-bar ' + (types[type] || 'status-loading');
+  const map = { loading:'status-loading', success:'status-success', error:'status-error', warn:'status-warn' };
+  bar.className = 'status-bar ' + (map[type] || 'status-loading');
   bar.innerHTML = type === 'loading'
     ? `<div class="spinner"></div><span>${msg}</span>`
     : `<span>${msg}</span>`;
 }
-function hideStatus() { document.getElementById('statusBar').style.display = 'none'; }
+function hideSideStatus(side) {
+  const prefix = side.charAt(0).toUpperCase() + side.slice(1);
+  const bar    = document.getElementById(`statusBar${prefix}`);
+  if (bar) bar.style.display = 'none';
+}
+// Compatibilidad con llamadas antiguas (login)
+function showStatus(msg, type) { showSideStatus('frente', msg, type); }
+function hideStatus()          { hideSideStatus('frente'); }
 
-// ── CONFIG ADMIN ───────────────────────────────
+// ── CONFIG ───────────────────────────────
 function openConfig() {
   document.getElementById('newAdminPass').value = '';
   openModal('configModal');
 }
 function saveConfig() {
-  const cfg = getCfg();
+  const cfg     = getCfg();
   const newPass = document.getElementById('newAdminPass').value;
   if (newPass) cfg.adminHash = CryptoJS.SHA256('admin:' + newPass).toString();
   saveCfg(cfg);
   closeModal('configModal');
 }
 
-// ── ADMIN VIEW (CARGAR DE SUPABASE) ─
+// ══════════════════════════════════════════
+//  ADMIN — CARGAR DE SUPABASE
+// ══════════════════════════════════════════
 async function loadAdminView() {
-  document.getElementById('tableBody').innerHTML = '<tr><td colspan="9" style="text-align:center;">Cargando registros desde la nube... ☁️</td></tr>';
-  
+  document.getElementById('tableBody').innerHTML =
+    '<tr><td colspan="11" style="text-align:center;">Cargando registros desde la nube... ☁️</td></tr>';
+
   try {
     const { data, error } = await clienteSupabase
       .from('registros_ine')
@@ -466,75 +653,72 @@ async function loadAdminView() {
       .order('fecha_registro', { ascending: false });
 
     if (error) throw error;
-    
-    // Si data llega pero está vacío, Supabase nos bloqueó
-    if (!data || data.length === 0) {
-        console.warn("Supabase devolvió 0 registros. Revisa el RLS.");
-    }
-    
-    // Mapeo (traducir de base de datos a HTML)
+
     allRecords = (data || []).map(row => ({
       ...row,
-      claveElector: row.clave_elector,
-      confianzaOCR: row.confianza_ocr,
+      claveElector:     row.clave_elector,
+      confianzaOCR:     row.confianza_ocr,
       requiereRevision: row.requiere_revision,
-      savedAt: row.fecha_registro
+      savedAt:          row.fecha_registro,
+      codigoBarras:     row.codigo_barras || ''
     }));
 
     renderStats();
     renderTable();
-  } catch (err) {
-    console.error("Error al cargar registros:", err);
-    document.getElementById('tableBody').innerHTML = `<tr><td colspan="9" style="color:red;">Error de carga: ${err.message}</td></tr>`;
+  } catch(err) {
+    console.error('Error al cargar registros:', err);
+    document.getElementById('tableBody').innerHTML =
+      `<tr><td colspan="11" style="color:red;">Error de carga: ${err.message}</td></tr>`;
   }
 }
 
-
 function renderStats() {
-  const total = allRecords.length;
-  const revision = allRecords.filter(r => r.requiereRevision).length;
-  const today = new Date().toDateString();
-  const hoy = allRecords.filter(r => new Date(r.savedAt).toDateString() === today).length;
-  const avgConf = total ? Math.round(allRecords.reduce((s,r) => s+(r.confianzaOCR||0), 0) / total) : 0;
+  const total   = allRecords.length;
+  const rev     = allRecords.filter(r => r.requiereRevision).length;
+  const today   = new Date().toDateString();
+  const hoy     = allRecords.filter(r => new Date(r.savedAt).toDateString() === today).length;
+  const avgConf = total
+    ? Math.round(allRecords.reduce((s, r) => s + (r.confianzaOCR || 0), 0) / total)
+    : 0;
 
   document.getElementById('statsRow').innerHTML = `
     <div class="stat-card"><div class="stat-num stat-accent">${total}</div><div class="stat-label">Total registros</div></div>
     <div class="stat-card"><div class="stat-num stat-gold">${hoy}</div><div class="stat-label">Hoy</div></div>
-    <div class="stat-card"><div class="stat-num ${revision > 0 ? 'stat-red' : 'stat-green'}">${revision}</div><div class="stat-label">En revisión manual</div></div>
-    <div class="stat-card"><div class="stat-num stat-green">${avgConf}%</div><div class="stat-label">Confianza promedio</div></div>
-  `;
+    <div class="stat-card"><div class="stat-num ${rev > 0 ? 'stat-red' : 'stat-green'}">${rev}</div><div class="stat-label">En revisión manual</div></div>
+    <div class="stat-card"><div class="stat-num stat-green">${avgConf}%</div><div class="stat-label">Confianza promedio</div></div>`;
 }
 
+// ── RF-06/07: FILTROS MULTICRITERIO + LIKE ─
 function getFilteredRecords() {
-  const q       = (document.getElementById('searchInput')?.value || '').trim().toLowerCase();
-  const sex     = document.getElementById('filterSexo')?.value || '';
-  const estado  = (document.getElementById('filterEstado')?.value || '').trim().toLowerCase();
-  const seccion = (document.getElementById('filterSeccion')?.value || '').trim();
-  const rev     = document.getElementById('filterRevision')?.value || '';
+  const q      = (document.getElementById('searchInput')?.value  || '').trim().toLowerCase();
+  const sex    =  document.getElementById('filterSexo')?.value   || '';
+  const estado = (document.getElementById('filterEstado')?.value || '').trim().toLowerCase();
+  const sec    = (document.getElementById('filterSeccion')?.value|| '').trim();
+  const rev    =  document.getElementById('filterRevision')?.value|| '';
 
   return allRecords.filter(r => {
     if (q) {
-      const haystack = [
+      const hay = [
         r.nombre, r.apellidoPaterno, r.apellidoMaterno,
-        r.curp, r.claveElector, r.folio, r.municipio, r.domicilio, r.vigencia
-      ].map(v => (v||'').toLowerCase()).join(' ');
-      if (!haystack.includes(q)) return false;
+        r.curp, r.claveElector, r.folio, r.municipio, r.domicilio, r.vigencia, r.codigoBarras
+      ].map(v => (v || '').toLowerCase()).join(' ');
+      if (!hay.includes(q)) return false;
     }
-    if (sex && !(r.sexo||'').toUpperCase().startsWith(sex)) return false;
-    if (estado && !(r.estado||'').toLowerCase().includes(estado)) return false;      
-    if (seccion && !(r.seccion||'').includes(seccion)) return false;                 
-    if (rev === '1' && !r.requiereRevision) return false;                            
-    if (rev === '0' && r.requiereRevision) return false;
+    if (sex    && !(r.sexo   || '').toUpperCase().startsWith(sex))           return false;
+    if (estado && !(r.estado || '').toLowerCase().includes(estado))          return false;
+    if (sec    && !String(r.seccion || '').includes(sec))                    return false;
+    if (rev === '1' && !r.requiereRevision)                                  return false;
+    if (rev === '0' &&  r.requiereRevision)                                  return false;
     return true;
   });
 }
 
 function renderTable() {
   const filtered = getFilteredRecords();
-  const total  = filtered.length;
-  const pages  = Math.ceil(total / PAGE_SIZE) || 1;
+  const total    = filtered.length;
+  const pages    = Math.ceil(total / PAGE_SIZE) || 1;
   page = Math.min(page, pages);
-  const slice  = filtered.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
+  const slice    = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const tbody = document.getElementById('tableBody');
   const empty = document.getElementById('tableEmpty');
@@ -545,31 +729,30 @@ function renderTable() {
   } else {
     empty.style.display = 'none';
     tbody.innerHTML = slice.map((r, i) => {
-      const conf = r.confianzaOCR || 0;
-      const confColor = conf >= 85 ? '#6ee7b7' : conf >= 60 ? '#fbbf24' : '#fca5a5';
-      const revBadge = r.requiereRevision
-        ? `<span style="font-size:.68rem; background:rgba(239,68,68,.15); color:#fca5a5; border:1px solid rgba(239,68,68,.3); padding:1px 5px; border-radius:4px; white-space:nowrap;">⚠ Revisión</span>`
+      const conf  = r.confianzaOCR || 0;
+      const color = conf >= 85 ? '#6ee7b7' : conf >= 60 ? '#fbbf24' : '#fca5a5';
+      const badge = r.requiereRevision
+        ? `<span style="font-size:.68rem;background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.3);padding:1px 5px;border-radius:4px;white-space:nowrap;">⚠ Revisión</span>`
         : '';
       return `
       <tr>
-        <td>${(page-1)*PAGE_SIZE + i + 1}</td>
+        <td>${(page - 1) * PAGE_SIZE + i + 1}</td>
         <td>
           ${escapeHtml([r.nombre, r.apellidoPaterno, r.apellidoMaterno].filter(Boolean).join(' ') || '—')}
-          ${revBadge}
+          ${badge}
         </td>
-        <td><code style="font-size:.75rem; color:var(--accent3)">${escapeHtml(r.curp||'—')}</code></td>
-        <td style="font-size:.75rem">${escapeHtml(r.claveElector||'—')}</td>
-        <td style="font-size:.78rem">${escapeHtml(r.seccion||'—')}</td>
-        <td>${escapeHtml(r.estado||'—')}</td>
-        <td>${escapeHtml(r.sexo||'—')}</td>
-        <td style="font-size:.75rem; color:var(--text3)">${formatDate(r.savedAt)}</td>
-        <td>
-          <span style="font-size:.78rem; font-weight:700; color:${confColor};">${conf}%</span>
-        </td>
+        <td><code style="font-size:.75rem;color:var(--accent3)">${escapeHtml(r.curp || '—')}</code></td>
+        <td style="font-size:.75rem">${escapeHtml(r.claveElector || '—')}</td>
+        <td style="font-size:.75rem;color:var(--gold2);font-weight:600;">${escapeHtml(r.folio || '—')}</td>
+        <td style="font-size:.78rem">${escapeHtml(String(r.seccion || '—'))}</td>
+        <td>${escapeHtml(r.estado || '—')}</td>
+        <td>${escapeHtml(r.sexo || '—')}</td>
+        <td style="font-size:.75rem;color:var(--text3)">${formatDate(r.savedAt)}</td>
+        <td><span style="font-size:.78rem;font-weight:700;color:${color};">${conf}%</span></td>
         <td>
           <div class="btn-group">
             <button class="btn btn-secondary btn-sm" onclick="viewRecord('${r.id}')">Ver</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteRecord('${r.id}')">✕</button>
+            <button class="btn btn-danger btn-sm"    onclick="deleteRecord('${r.id}')">✕</button>
           </div>
         </td>
       </tr>`;
@@ -577,46 +760,59 @@ function renderTable() {
   }
 
   document.getElementById('pager').innerHTML = `
-    <button onclick="page=Math.max(1,page-1);renderTable()" ${page<=1?'disabled':''}>‹ Anterior</button>
+    <button onclick="page=Math.max(1,page-1);renderTable()" ${page <= 1 ? 'disabled' : ''}>‹ Anterior</button>
     <span>Página ${page} de ${pages} · ${total} registros</span>
-    <button onclick="page=Math.min(${pages},page+1);renderTable()" ${page>=pages?'disabled':''}>Siguiente ›</button>
-  `;
+    <button onclick="page=Math.min(${pages},page+1);renderTable()" ${page >= pages ? 'disabled' : ''}>Siguiente ›</button>`;
 }
 
+// ── RF-08: VER REGISTRO CON AMBAS IMÁGENES ─
 function viewRecord(id) {
   const r = allRecords.find(x => x.id === id);
   if (!r) return;
 
-  const conf = r.confianzaOCR || 0;
-  const confColor = conf >= 85 ? '#6ee7b7' : conf >= 60 ? '#fbbf24' : '#fca5a5';
+  const conf  = r.confianzaOCR || 0;
+  const color = conf >= 85 ? '#6ee7b7' : conf >= 60 ? '#fbbf24' : '#fca5a5';
 
-  const imgSection = r.imagen_url
-    ? `<div style="margin-bottom:1rem;">
-        <div class="data-label" style="margin-bottom:.5rem;">Imagen original (Supabase Storage)</div>
-        <img src="${r.imagen_url}" alt="INE original"
-          style="width:100%; border-radius:8px; border:1px solid var(--border); object-fit:contain; max-height:220px; background:#000;">
+  // Imágenes: frente y reverso
+  const makeImg = (src, label) => src
+    ? `<div>
+        <div class="data-label" style="margin-bottom:.4rem;">${label}</div>
+        <img src="${src}" alt="${label}"
+          style="width:100%;border-radius:8px;border:1px solid var(--border);
+                 object-fit:contain;max-height:180px;background:#000;">
        </div>`
-    : `<div style="color:var(--text3); font-size:.82rem; margin-bottom:1rem; padding:1rem; background:var(--bg2); border-radius:8px;">
-        Sin imagen adjunta
-       </div>`;
+    : `<div style="color:var(--text3);font-size:.8rem;padding:1rem;
+                   background:var(--bg2);border-radius:8px;">Sin imagen (${label.toLowerCase()})</div>`;
+
+  const imgRow = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:1rem;">
+      ${makeImg(r.imagen_url,         'Frente de la INE')}
+      ${makeImg(r.imagen_reverso_url, 'Reverso de la INE')}
+    </div>`;
 
   const confSection = `
-    <div class="data-item" style="margin-bottom:.75rem; border-color:${confColor}33; background:${confColor}0d; grid-column:1/-1;">
+    <div class="data-item" style="margin-bottom:.75rem;border-color:${color}33;background:${color}0d;grid-column:1/-1;">
       <div class="data-label">Confianza OCR</div>
-      <div style="display:flex; align-items:center; gap:10px; margin-top:4px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
         <div class="confidence-bar-bg" style="flex:1;">
-          <div class="confidence-bar-fill" style="width:${conf}%; background:${confColor};"></div>
+          <div class="confidence-bar-fill" style="width:${conf}%;background:${color};"></div>
         </div>
-        <span style="color:${confColor}; font-weight:700;">${conf}%</span>
-        ${r.requiereRevision ? '<span class="revision-badge">⚠ REVISIÓN MANUAL</span>' : '<span class="ok-badge">✓ OK</span>'}
+        <span style="color:${color};font-weight:700;">${conf}%</span>
+        ${r.requiereRevision
+          ? '<span class="revision-badge">⚠ REVISIÓN MANUAL</span>'
+          : '<span class="ok-badge">✓ OK</span>'}
       </div>
     </div>`;
 
-  const fields = Object.entries(FIELD_LABELS).map(([k, label]) => `
-    <div class="data-item" style="margin-bottom:.4rem;">
-      <div class="data-label">${label}</div>
-      <div class="data-value">${escapeHtml(r[k]||'—')}</div>
-    </div>`).join('');
+  const fields = Object.entries(FIELD_LABELS).map(([k, label]) => {
+    const val   = r[k] || r[k === 'claveElector' ? 'clave_elector' : k] || '';
+    const extra = (k === 'folio' || k === 'codigoBarras') ? ' folio-highlight' : '';
+    return `
+      <div class="data-item${extra}" style="margin-bottom:.4rem;">
+        <div class="data-label">${label}${k === 'folio' ? ' 🔁' : ''}</div>
+        <div class="data-value">${escapeHtml(String(val || '—'))}</div>
+      </div>`;
+  }).join('');
 
   const meta = `
     <div class="data-item" style="margin-bottom:.4rem;">
@@ -625,151 +821,151 @@ function viewRecord(id) {
     </div>`;
 
   document.getElementById('modalContent').innerHTML =
-    imgSection +
-    `<div class="data-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.6rem;">
+    imgRow +
+    `<div class="data-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.6rem;">
       ${confSection}${fields}${meta}
-    </div>`;
+     </div>`;
 
   document.getElementById('modalDeleteBtn').onclick = () => {
-    deleteRecord(id); closeModal('detailModal');
+    deleteRecord(id);
+    closeModal('detailModal');
   };
   openModal('detailModal');
 }
 
-// ── ELIMINAR DE SUPABASE ─────────────────
+// ── ELIMINAR ─────────────────────────────
 async function deleteRecord(id) {
   if (!confirm('¿Eliminar este registro permanentemente de la base de datos?')) return;
   try {
     const { error } = await clienteSupabase.from('registros_ine').delete().eq('id', id);
     if (error) throw error;
-    
     allRecords = allRecords.filter(r => r.id !== id);
     renderStats();
     renderTable();
   } catch(err) {
     console.error(err);
-    alert("Error al eliminar el registro.");
+    alert('Error al eliminar el registro.');
   }
 }
 
 async function confirmClear() {
   if (!confirm('¿Eliminar TODOS los registros de la nube? Esta acción es irreversible.')) return;
   try {
-    const { error } = await clienteSupabase.from('registros_ine').delete().neq('id', '00000000-0000-0000-0000-000000000000'); 
+    const { error } = await clienteSupabase
+      .from('registros_ine')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
     if (error) throw error;
-    
     allRecords = [];
     renderStats();
     renderTable();
-  } catch (err) {
+  } catch(err) {
     console.error(err);
-    alert("Error al vaciar la base de datos.");
+    alert('Error al vaciar la base de datos.');
   }
 }
 
-// ── EXPORTACIÓN ───────────────────
+// ── EXPORTACIÓN RF-09 ────────────────────
 function exportCSV() {
-  const filtered = getFilteredRecords(); 
-  if (!filtered.length) { alert('No hay registros para exportar con los filtros actuales.'); return; }
+  const filtered = getFilteredRecords();
+  if (!filtered.length) { alert('No hay registros para exportar.'); return; }
 
-  const cols = ['id', ...Object.keys(FIELD_LABELS), 'seccion', 'confianzaOCR', 'requiereRevision', 'savedAt'];
-  const uniqueCols = [...new Set(cols)];
-  const header = uniqueCols.join(',');
-  const rows = filtered.map(r =>
-    uniqueCols.map(c => {
-      const val = c === 'requiereRevision' ? (r[c] ? 'SÍ' : 'NO') : (r[c] || '');
-      return `"${String(val).replace(/"/g,'""')}"`;
-    }).join(',')
-  );
-  const csv = [header, ...rows].join('\n');
+  const cols = ['id', ...Object.keys(FIELD_LABELS), 'confianzaOCR', 'requiereRevision', 'savedAt'];
+  const uniq = [...new Set(cols)];
+  const csv  = [uniq.join(','),
+    ...filtered.map(r => uniq.map(c => {
+      const v = c === 'requiereRevision' ? (r[c] ? 'SÍ' : 'NO') : (r[c] || '');
+      return `"${String(v).replace(/"/g,'""')}"`;
+    }).join(','))
+  ].join('\n');
   downloadBlob('\ufeff' + csv, 'text/csv;charset=utf-8;',
-    'registros_ine_' + new Date().toISOString().slice(0,10) + '.csv');
+    'registros_ine_' + new Date().toISOString().slice(0, 10) + '.csv');
 }
 
 function exportExcel() {
   const filtered = getFilteredRecords();
-  if (!filtered.length) { alert('No hay registros para exportar con los filtros actuales.'); return; }
+  if (!filtered.length) { alert('No hay registros para exportar.'); return; }
 
   const cols = ['id', ...Object.keys(FIELD_LABELS), 'confianzaOCR', 'requiereRevision', 'savedAt'];
-  const uniqueCols = [...new Set(cols)];
-
-  const headers = {
+  const uniq = [...new Set(cols)];
+  const hdrs = {
     id:'ID', nombre:'Nombre(s)', apellidoPaterno:'Apellido Paterno',
     apellidoMaterno:'Apellido Materno', curp:'CURP', claveElector:'Clave Elector',
     fechaNacimiento:'Fecha Nacimiento', sexo:'Sexo', estado:'Estado',
     municipio:'Municipio', seccion:'Sección', folio:'Folio',
-    vigencia:'Vigencia', domicilio:'Domicilio', anioRegistro:'Año Registro',
-    confianzaOCR:'Confianza OCR %', requiereRevision:'Requiere Revisión', savedAt:'Fecha Registro'
+    codigoBarras:'Código Barras', vigencia:'Vigencia', domicilio:'Domicilio',
+    anioRegistro:'Año Registro', confianzaOCR:'Confianza OCR %',
+    requiereRevision:'Requiere Revisión', savedAt:'Fecha Registro'
   };
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <?mso-application progid="Excel.Sheet"?>
 <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
-  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
-  xmlns:x="urn:schemas-microsoft-com:office:excel">
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
 <Styles>
   <Style ss:ID="h"><Font ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#2563EB" ss:Pattern="Solid"/></Style>
+  <Style ss:ID="f"><Interior ss:Color="#FEF3C7" ss:Pattern="Solid"/></Style>
   <Style ss:ID="w"><Interior ss:Color="#FFFF00" ss:Pattern="Solid"/></Style>
 </Styles>
-<Worksheet ss:Name="Registros INE">
-<Table>
-<Row>`;
+<Worksheet ss:Name="Registros INE"><Table>\n<Row>`;
 
-  uniqueCols.forEach(c => {
-    xml += `<Cell ss:StyleID="h"><Data ss:Type="String">${escapeXml(headers[c]||c)}</Data></Cell>`;
+  uniq.forEach(c => {
+    xml += `<Cell ss:StyleID="h"><Data ss:Type="String">${escapeXml(hdrs[c] || c)}</Data></Cell>`;
   });
   xml += '</Row>\n';
 
   filtered.forEach(r => {
     xml += '<Row>';
-    uniqueCols.forEach(c => {
-      let val = r[c];
+    uniq.forEach(c => {
+      let val  = r[c];
       if (c === 'requiereRevision') val = val ? 'SÍ' : 'NO';
-      const styleAttr = (c === 'requiereRevision' && r[c]) ? ' ss:StyleID="w"' : '';
-      xml += `<Cell${styleAttr}><Data ss:Type="String">${escapeXml(String(val||''))}</Data></Cell>`;
+      const st = c === 'folio' ? ' ss:StyleID="f"'
+               : (c === 'requiereRevision' && r[c]) ? ' ss:StyleID="w"' : '';
+      xml += `<Cell${st}><Data ss:Type="String">${escapeXml(String(val || ''))}</Data></Cell>`;
     });
     xml += '</Row>\n';
   });
 
   xml += '</Table></Worksheet></Workbook>';
-  downloadBlob(xml, 'application/vnd.ms-excel', 'registros_ine_' + new Date().toISOString().slice(0,10) + '.xls');
+  downloadBlob(xml, 'application/vnd.ms-excel',
+    'registros_ine_' + new Date().toISOString().slice(0, 10) + '.xls');
 }
 
-function escapeXml(str) {
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+// ── HELPERS ──────────────────────────────
+function escapeXml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                  .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
 }
-
-function downloadBlob(content, mimeType, filename) {
-  const blob = new Blob([content], { type: mimeType });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 500);
-}
-
-// ── MODAL ────────────────────────────────
-function openModal(id) { document.getElementById(id).classList.add('open'); }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-window.addEventListener('click', e => {
-  ['detailModal','configModal'].forEach(id => {
-    const el = document.getElementById(id);
-    if (e.target === el) closeModal(id);
-  });
-});
-
-function escapeHtml(str) {
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                  .replace(/"/g,'&quot;');
 }
 function formatDate(iso) {
   if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleDateString('es-MX', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  return new Date(iso).toLocaleDateString('es-MX',
+    { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+function downloadBlob(content, mime, filename) {
+  const a  = Object.assign(document.createElement('a'), {
+    href:     URL.createObjectURL(new Blob([content], { type: mime })),
+    download: filename
+  });
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 500);
 }
 
+// ── MODAL ────────────────────────────────
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+window.addEventListener('click', e => {
+  ['detailModal','configModal'].forEach(id => {
+    if (e.target === document.getElementById(id)) closeModal(id);
+  });
+});
+
+// ── INIT ─────────────────────────────────
 (function init() {
-  document.querySelectorAll('#viewScanner .nav-btn')[0].classList.add('active');
+  document.querySelectorAll('#viewScanner .nav-btn')[0]?.classList.add('active');
 })();
