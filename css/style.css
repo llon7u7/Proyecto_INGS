@@ -437,3 +437,155 @@ tbody td:first-child { color: var(--text); font-weight: 500; }
 /* ── CONFIG MODAL ── */
 #configModal { display: none; }
 #configModal.open { display: flex; }
+/* ══════════════════════════════════════════
+   FLUJO DE 2 PASOS (FRENTE + REVERSO)
+══════════════════════════════════════════ */
+
+/* ── STEPPER ── */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 1.75rem;
+  padding: 1.2rem 1.5rem;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  position: relative;
+}
+.step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: calc(100% - 130px);
+  height: 2px;
+  background: var(--border2);
+  left: 130px;
+  transition: background .4s;
+}
+.step.done:not(:last-child)::after {
+  background: var(--success);
+}
+.step-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--border2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-head);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text3);
+  background: var(--bg3);
+  transition: all .3s;
+  flex-shrink: 0;
+}
+.step.active .step-circle {
+  border-color: var(--accent2);
+  color: var(--accent3);
+  background: rgba(37,99,235,0.15);
+  box-shadow: 0 0 0 4px rgba(37,99,235,0.12);
+}
+.step.done .step-circle {
+  border-color: var(--success);
+  color: #fff;
+  background: var(--success);
+}
+.step-info { flex: 1; min-width: 0; }
+.step-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text3);
+  display: block;
+}
+.step.active .step-label { color: var(--accent3); }
+.step.done .step-label  { color: #6ee7b7; }
+.step-desc {
+  font-size: 0.82rem;
+  color: var(--text3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.step.active .step-desc { color: var(--text2); }
+
+/* ── SCAN PANELS ── */
+.scan-panel { display: none; }
+.scan-panel.active { display: block; }
+
+/* ── REVERSO BADGE ── */
+.reverso-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(245,158,11,0.1);
+  border: 1px solid rgba(245,158,11,0.25);
+  color: var(--gold2);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  margin-bottom: .75rem;
+}
+
+/* ── FOLIO HIGHLIGHT ── */
+.folio-highlight {
+  background: rgba(245,158,11,0.08) !important;
+  border-color: rgba(245,158,11,0.35) !important;
+}
+.folio-highlight .data-label { color: var(--gold2) !important; }
+.folio-highlight .data-value.editable { color: var(--gold2) !important; }
+
+/* ── COMBINED RESULT ── */
+.combined-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(16,185,129,0.08);
+  border: 1px solid rgba(16,185,129,0.2);
+  border-radius: var(--radius2);
+  font-size: 0.83rem;
+  color: #6ee7b7;
+  margin-bottom: 1rem;
+}
+
+/* ── SKIP REVERSO ── */
+.skip-link {
+  font-size: 0.78rem;
+  color: var(--text3);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: none;
+  border: none;
+  padding: 0;
+  transition: color .2s;
+}
+.skip-link:hover { color: var(--text2); }
+
+/* ── STATUS WARN (ya existía, por si acaso) ── */
+.status-warn {
+  background: rgba(245,158,11,0.12);
+  border: 1px solid rgba(245,158,11,0.25);
+  color: #fde68a;
+}
+
+/* ── RESPONSIVE FIX PARA STEPPER ── */
+@media (max-width: 600px) {
+  .stepper { padding: 1rem; flex-direction: column; align-items: flex-start; gap: 1rem; }
+  .step::after { display: none; }
+  .step { gap: 12px; }
+}
