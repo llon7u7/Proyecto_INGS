@@ -565,27 +565,41 @@ async function saveRecord() {
   const normalized = normalizeRecord(edited);
 
   try {
+    // ── Valores seguros para campos NOT NULL ──────────────────────────────
+    const curpVal     = normalized.curp      || 'SIN-CURP';
+    const nombreVal   = normalized.nombre    || 'SIN-NOMBRE';
+    const claveVal    = (normalized.claveElector || normalized.clave_Elector || 'SIN-CLAVE').slice(0,18);
+    const seccionVal  = parseInt(normalized.seccion) || 0;
+    // imagen_url NOT NULL: usamos frente; si no hay, placeholder vacío
+    const imagenVal   = state.frente.dataURL || '';
+
+    // ── Mapeo exacto contra esquema de Supabase ───────────────────────────
+    // Columnas con comillas en Postgres: apellidoPaterno, apellidoMaterno,
+    // fechaNacimiento, anioRegistro  →  el cliente JS de Supabase las acepta
+    // con el nombre exacto (case-sensitive) sin comillas adicionales.
     const recordToSave = {
-      nombre:            normalized.nombre,
-      apellidoPaterno:   normalized.apellidoPaterno,
-      apellidoMaterno:   normalized.apellidoMaterno,
-      curp:              normalized.curp,
-      clave_elector:     normalized.claveElector,
-      fechaNacimiento:   normalized.fechaNacimiento,
-      sexo:              normalized.sexo,
-      estado:            normalized.estado,
-      municipio:         normalized.municipio,
-      seccion:           parseInt(normalized.seccion) || null,
-      folio:             normalized.folio,            // ← del reverso
-      codigo_barras:     normalized.codigoBarras,     // ← del reverso
-      vigencia:          normalized.vigencia,
-      direccion:         normalized.domicilio,
-      anioRegistro:      normalized.anioRegistro,
+      // NOT NULL
+      curp:              curpVal,
+      nombre:            nombreVal,
+      clave_elector:     claveVal,
+      seccion:           seccionVal,
+      imagen_url:        imagenVal,
+      // Nullable — nombres exactos del schema (case-sensitive)
+      apellidoPaterno:   normalized.apellidoPaterno   || null,
+      apellidoMaterno:   normalized.apellidoMaterno   || null,
+      fechaNacimiento:   normalized.fechaNacimiento   || null,
+      sexo:              normalized.sexo              || null,
+      estado:            normalized.estado            || null,
+      municipio:         normalized.municipio         || null,
+      folio:             normalized.folio             || null,
+      vigencia:          normalized.vigencia          || null,
+      direccion:         normalized.domicilio         || null,
+      anioRegistro:      normalized.anioRegistro      || null,
       confianza_ocr:     currentData.confianzaOCR     || 0,
       requiere_revision: currentData.requiereRevision || false,
-      // RF-08: guardar ambas imágenes
-      imagen_url:         state.frente.dataURL  || null,
-      imagen_reverso_url: state.reverso.dataURL || null,
+      // imagen_url ya asignado arriba (NOT NULL)
+      // ⚠ imagen_reverso_url y codigo_barras NO existen en la tabla actual
+      //   → se omiten para evitar el error 400
     };
 
     const { error } = await clienteSupabase
@@ -656,13 +670,18 @@ async function loadAdminView() {
 
     allRecords = (data || []).map(row => ({
       ...row,
-      claveElector:     row.clave_elector,
-      confianzaOCR:     row.confianza_ocr,
-      requiereRevision: row.requiere_revision,
-      savedAt:          row.fecha_registro,
-      codigoBarras:     row.codigo_barras || ''
+      claveElector:       row.clave_elector      || "",
+      confianzaOCR:       Number(row.confianza_ocr) || 0,
+      requiereRevision:   row.requiere_revision  || false,
+      savedAt:            row.fecha_registro     || "",
+      domicilio:          row.direccion          || "",
+      apellidoPaterno:    row.apellidoPaterno     || "",
+      apellidoMaterno:    row.apellidoMaterno     || "",
+      fechaNacimiento:    row.fechaNacimiento     || "",
+      anioRegistro:       row.anioRegistro        || "",
+      codigoBarras:       "",
+      // imagen_reverso_url: no existe en DB — se resuelve en viewRecord con || null
     }));
-
     renderStats();
     renderTable();
   } catch(err) {
@@ -671,6 +690,7 @@ async function loadAdminView() {
       `<tr><td colspan="11" style="color:red;">Error de carga: ${err.message}</td></tr>`;
   }
 }
+
 
 function renderStats() {
   const total   = allRecords.length;
@@ -784,11 +804,15 @@ function viewRecord(id) {
     : `<div style="color:var(--text3);font-size:.8rem;padding:1rem;
                    background:var(--bg2);border-radius:8px;">Sin imagen (${label.toLowerCase()})</div>`;
 
-  const imgRow = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:1rem;">
-      ${makeImg(r.imagen_url,         'Frente de la INE')}
-      ${makeImg(r.imagen_reverso_url, 'Reverso de la INE')}
-    </div>`;
+  // imagen_url = frente (existe en DB)
+  // imagen_reverso_url no existe en la tabla actual → se omite si es null
+  const hasReverso = r.imagen_reverso_url && r.imagen_reverso_url.length > 10;
+  const imgRow = hasReverso
+    ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:1rem;">
+        ${makeImg(r.imagen_url,         'Frente de la INE')}
+        ${makeImg(r.imagen_reverso_url, 'Reverso de la INE')}
+       </div>`
+    : `<div style="margin-bottom:1rem;">${makeImg(r.imagen_url, 'Imagen de la INE')}</div>`;
 
   const confSection = `
     <div class="data-item" style="margin-bottom:.75rem;border-color:${color}33;background:${color}0d;grid-column:1/-1;">
@@ -893,7 +917,7 @@ function exportExcel() {
     apellidoMaterno:'Apellido Materno', curp:'CURP', claveElector:'Clave Elector',
     fechaNacimiento:'Fecha Nacimiento', sexo:'Sexo', estado:'Estado',
     municipio:'Municipio', seccion:'Sección', folio:'Folio',
-    codigoBarras:'Código Barras', vigencia:'Vigencia', domicilio:'Domicilio',
+    vigencia:'Vigencia', domicilio:'Domicilio',
     anioRegistro:'Año Registro', confianzaOCR:'Confianza OCR %',
     requiereRevision:'Requiere Revisión', savedAt:'Fecha Registro'
   };
