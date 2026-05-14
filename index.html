@@ -10,11 +10,7 @@
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════
-     SCANNER VIEW
-═══════════════════════════════════════ -->
 <div id="viewScanner" class="view active">
-
   <nav>
     <div class="nav-brand"><div class="dot"></div> INE Scanner</div>
     <div class="nav-links">
@@ -29,123 +25,219 @@
   </nav>
 
   <div class="container">
-
     <div class="hero">
       <div class="hero-badge">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><circle cx="6" cy="6" r="5"/></svg>
         Powered by 4 Inges
       </div>
       <h1>Escaneo inteligente<br>de <span>credenciales INE</span></h1>
-      <p>Carga una foto o usa la cámara. La IA extrae los datos automáticamente y los guarda de forma encriptada.</p>
+      <p>Escanea frente y reverso para extraer todos los datos, incluyendo el folio.</p>
+    </div>
+
+    <!-- STEPPER -->
+    <div class="stepper" id="stepper">
+      <div class="step active" id="step1">
+        <div class="step-circle">1</div>
+        <div class="step-info">
+          <span class="step-label">Paso 1</span>
+          <span class="step-desc">Frente de la INE</span>
+        </div>
+      </div>
+      <div class="step" id="step2">
+        <div class="step-circle">2</div>
+        <div class="step-info">
+          <span class="step-label">Paso 2</span>
+          <span class="step-desc">Reverso · Folio</span>
+        </div>
+      </div>
     </div>
 
     <div class="two-col">
 
-      <!-- LEFT: UPLOAD / CAMERA (RF-01) -->
+      <!-- COLUMNA IZQUIERDA: captura -->
       <div style="display:flex; flex-direction:column; gap:1rem;">
 
-        <div class="tabs">
-          <button class="tab active" onclick="switchInputTab('upload', this)">📁 Subir imagen</button>
-          <button class="tab" onclick="switchInputTab('camera', this)">📷 Usar cámara</button>
-        </div>
+        <!-- PANEL PASO 1: FRENTE -->
+        <div class="scan-panel active" id="panelFrente">
+          <div class="tabs" id="tabsFrente">
+            <button class="tab active" onclick="switchInputTab('upload','frente',this)">📁 Subir imagen</button>
+            <button class="tab" onclick="switchInputTab('camera','frente',this)">📷 Usar cámara</button>
+          </div>
 
-        <!-- RF-01: Carga de imagen -->
-        <div id="uploadSection">
-          <div class="upload-zone" id="dropZone">
-            <input type="file" accept="image/jpeg,image/png,image/heic,image/heif" id="fileInput" onchange="onFileSelect(event)">
-            <div class="upload-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-              </svg>
+          <div id="uploadSectionFrente">
+            <div class="upload-zone" id="dropZoneFrente">
+              <input type="file" accept="image/jpeg,image/png,image/heic,image/heif"
+                id="fileInputFrente" onchange="onFileSelect(event,'frente')">
+              <div class="upload-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                </svg>
+              </div>
+              <p class="upload-title">Arrastra el <strong>FRENTE</strong> de la INE</p>
+              <p class="upload-sub">o haz clic para seleccionar · JPG, PNG, HEIC</p>
             </div>
-            <p class="upload-title">Arrastra tu foto aquí</p>
-            <p class="upload-sub">o haz clic para seleccionar · JPG, PNG, HEIC</p>
           </div>
-        </div>
 
-        <!-- RF-01: Captura desde cámara -->
-        <div id="cameraSection">
-          <video id="video" autoplay muted playsinline></video>
-          <canvas id="captureCanvas"></canvas>
-          <div class="btn-group mt-1">
-            <button class="btn btn-primary" onclick="capturePhoto()">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/><path fill="none" stroke="currentColor" stroke-width="2" d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/></svg>
-              Capturar foto
+          <div id="cameraSectionFrente" style="display:none">
+            <video id="videoFrente" autoplay muted playsinline></video>
+            <canvas id="captureCanvasFrente"></canvas>
+            <div class="btn-group mt-1">
+              <button class="btn btn-primary" onclick="capturePhoto('frente')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/><path fill="none" stroke="currentColor" stroke-width="2" d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/></svg>
+                Capturar frente
+              </button>
+              <button class="btn btn-secondary" onclick="stopCamera('frente')">Cancelar</button>
+            </div>
+          </div>
+
+          <img id="previewImgFrente" alt="Preview frente INE"
+            style="max-width:100%;border-radius:var(--radius2);border:1px solid var(--border);display:none;margin-top:.5rem;">
+
+          <div class="btn-group" style="margin-top:.75rem;">
+            <button class="btn btn-primary" id="btnScanFrente" onclick="scanSide('frente')" disabled>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/>
+                <rect x="7" y="7" width="10" height="10" rx="1"/>
+              </svg>
+              Escanear frente
             </button>
-            <button class="btn btn-secondary" onclick="stopCamera()">Cancelar</button>
+            <button class="btn btn-secondary" id="btnClearFrente" onclick="clearSide('frente')" style="display:none">Limpiar</button>
+          </div>
+          <div id="statusBarFrente" style="display:none"></div>
+        </div>
+
+        <!-- PANEL PASO 2: REVERSO -->
+        <div class="scan-panel" id="panelReverso">
+          <div class="reverso-badge">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+            </svg>
+            Reverso de la INE — extracción del Folio
+          </div>
+
+          <div class="tabs" id="tabsReverso">
+            <button class="tab active" onclick="switchInputTab('upload','reverso',this)">📁 Subir imagen</button>
+            <button class="tab" onclick="switchInputTab('camera','reverso',this)">📷 Usar cámara</button>
+          </div>
+
+          <div id="uploadSectionReverso">
+            <div class="upload-zone" id="dropZoneReverso">
+              <input type="file" accept="image/jpeg,image/png,image/heic,image/heif"
+                id="fileInputReverso" onchange="onFileSelect(event,'reverso')">
+              <div class="upload-icon" style="background:rgba(245,158,11,0.15);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold2)" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+                </svg>
+              </div>
+              <p class="upload-title">Arrastra el <strong>REVERSO</strong> de la INE</p>
+              <p class="upload-sub">Se extraerá el folio y código de barras · JPG, PNG, HEIC</p>
+            </div>
+          </div>
+
+          <div id="cameraSectionReverso" style="display:none">
+            <video id="videoReverso" autoplay muted playsinline></video>
+            <canvas id="captureCanvasReverso"></canvas>
+            <div class="btn-group mt-1">
+              <button class="btn btn-primary" onclick="capturePhoto('reverso')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/><path fill="none" stroke="currentColor" stroke-width="2" d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/></svg>
+                Capturar reverso
+              </button>
+              <button class="btn btn-secondary" onclick="stopCamera('reverso')">Cancelar</button>
+            </div>
+          </div>
+
+          <img id="previewImgReverso" alt="Preview reverso INE"
+            style="max-width:100%;border-radius:var(--radius2);border:1px solid rgba(245,158,11,0.25);display:none;margin-top:.5rem;">
+
+          <div class="btn-group" style="margin-top:.75rem;">
+            <button class="btn btn-primary" id="btnScanReverso" onclick="scanSide('reverso')" disabled
+              style="background:linear-gradient(135deg,#b45309,#d97706);">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/>
+                <rect x="7" y="7" width="10" height="10" rx="1"/>
+              </svg>
+              Escanear reverso
+            </button>
+            <button class="btn btn-secondary" id="btnClearReverso" onclick="clearSide('reverso')" style="display:none">Limpiar</button>
+          </div>
+          <div id="statusBarReverso" style="display:none"></div>
+
+          <div style="margin-top:.75rem; text-align:right;">
+            <button class="skip-link" onclick="skipReverso()">Omitir reverso → guardar sin folio</button>
           </div>
         </div>
 
-        <!-- Preview -->
-        <img id="previewImg" alt="Preview de INE">
+      </div><!-- /col izquierda -->
 
-        <!-- Actions -->
-        <div class="btn-group">
-          <!-- RF-02: Procesar OCR (máx 5s - RNF-01) -->
-          <button class="btn btn-primary" id="btnScan" onclick="scanINE()" disabled>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
-            Escanear INE
-          </button>
-          <button class="btn btn-secondary" id="btnClear" onclick="clearImage()" style="display:none">Limpiar</button>
-        </div>
-
-        <!-- RNF-01: Status con feedback de tiempo -->
-        <div id="statusBar" style="display:none"></div>
-
-      </div>
-
-      <!-- RIGHT: RESULTS -->
+      <!-- COLUMNA DERECHA: resultados -->
       <div>
         <div class="card" style="min-height:300px;">
           <div class="card-title">Datos extraídos</div>
 
-          <!-- RF-02/03/04: Resultados OCR normalizados con confianza -->
-          <div id="extractedData">
+          <div id="extractedData" style="display:none;">
+            <div class="combined-banner" id="combinedBanner" style="display:none;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+              </svg>
+              Frente + Reverso combinados · Folio incluido
+            </div>
             <div class="data-grid" id="dataGrid"></div>
             <div class="mt-2">
               <div class="security-note mb-1">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                <!-- RNF-03: Encriptación AES-256 -->
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
                 <span>AES-256 encriptado</span> antes de guardar · Edita los campos si es necesario
               </div>
               <div class="btn-group">
-                <!-- RF-05: Guardar con imagen -->
                 <button class="btn btn-success" onclick="saveRecord()">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+                    <polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/>
+                  </svg>
                   Guardar registro
                 </button>
-                <button class="btn btn-secondary btn-sm" onclick="resetExtracted()">Nueva captura</button>
+                <button class="btn btn-secondary btn-sm" onclick="resetAll()">Nueva captura</button>
               </div>
             </div>
           </div>
 
-          <div id="emptyExtracted" style="text-align:center; color:var(--text3); padding:3rem 1rem;">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 1rem; display:block; opacity:.3"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
-            <p style="font-size:.9rem;">Sube una foto de INE y presiona<br>«Escanear INE» para comenzar.</p>
+          <div id="emptyExtracted">
+            <div style="text-align:center;color:var(--text3);padding:2rem 1rem;">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                style="margin:0 auto 1rem;display:block;opacity:.3">
+                <rect x="3" y="4" width="18" height="16" rx="2"/>
+                <path d="M8 2v4M16 2v4M3 10h18"/>
+              </svg>
+              <p id="emptyMsg" style="font-size:.9rem;">
+                Sube el <strong>frente</strong> de la INE<br>y presiona «Escanear frente» para comenzar.
+              </p>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-  </div>
-</div>
+    </div><!-- /two-col -->
+  </div><!-- /container -->
+</div><!-- /viewScanner -->
 
-<!-- ═══════════════════════════════════════
-     LOGIN VIEW
-═══════════════════════════════════════ -->
+
+<!-- LOGIN VIEW -->
 <div id="viewLogin" class="view">
   <div class="login-wrap">
     <div class="login-card">
       <div class="login-logo">
         <div class="lock-icon">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+          </svg>
         </div>
         <h2>Panel Admin</h2>
         <p>Acceso restringido al administrador</p>
       </div>
       <div class="field mb-2">
-        <label>Usuario</label>
-        <input type="text" id="loginUser" placeholder="admin" value="admin">
+        <label>Correo electrónico</label>
+        <input type="text" id="loginUser" placeholder="correo@ejemplo.com">
       </div>
       <div class="field mb-2">
         <label>Contraseña</label>
@@ -153,21 +245,19 @@
           onkeydown="if(event.key==='Enter')doLogin()">
       </div>
       <button class="btn btn-primary" style="width:100%" onclick="doLogin()">Ingresar</button>
-      <div class="login-err" id="loginErr">Usuario o contraseña incorrectos</div>
+      <div class="login-err" id="loginErr" style="display:none;">Error al iniciar sesión</div>
       <div class="security-note mt-2">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <span>Credenciales hasheadas</span> con SHA-256
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <span>Autenticación</span> gestionada por Supabase Auth
       </div>
-      <p style="font-size:0.78rem; color:var(--text3); text-align:center; margin-top:1rem;">
-        Demo: usuario <code style="color:var(--accent3)">admin</code> / contraseña <code style="color:var(--accent3)">admin123</code>
-      </p>
     </div>
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════
-     ADMIN VIEW
-═══════════════════════════════════════ -->
+
+<!-- ADMIN VIEW -->
 <div id="viewAdmin" class="view">
   <nav>
     <div class="nav-brand"><div class="dot"></div> INE Scanner</div>
@@ -183,60 +273,46 @@
   </nav>
 
   <div class="container">
-
-    <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap; gap:1rem;">
+    <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap;gap:1rem;">
       <div>
-        <h2 style="font-family:var(--font-head); font-size:1.4rem; font-weight:700;">Base de datos</h2>
-        <p style="color:var(--text3); font-size:.85rem;">Registros INE encriptados · <span class="enc-pill">🔒 AES-256</span></p>
+        <h2 style="font-family:var(--font-head);font-size:1.4rem;font-weight:700;">Base de datos</h2>
+        <p style="color:var(--text3);font-size:.85rem;">Registros INE · Supabase · <span class="enc-pill">🔒 AES-256</span></p>
       </div>
       <div class="btn-group">
-        <!-- RF-09: Exportar CSV -->
         <button class="btn btn-secondary btn-sm" onclick="exportCSV()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-          CSV
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+          </svg>CSV
         </button>
-        <!-- RF-09: Exportar Excel/XLSX -->
         <button class="btn btn-excel btn-sm" onclick="exportExcel()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-          Excel
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+          </svg>Excel
         </button>
         <button class="btn btn-danger btn-sm" onclick="confirmClear()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
-          Limpiar todo
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6M9 6V4h6v2"/>
+          </svg>Limpiar todo
         </button>
       </div>
     </div>
 
-    <!-- Stats (RF-04: stat de revisión manual) -->
     <div class="stats-row" id="statsRow"></div>
 
-    <!-- RF-06/07: Búsqueda multicriterio + LIKE -->
     <div class="filter-bar mb-2">
       <input type="text" id="searchInput"
-        placeholder="Buscar por nombre, CURP, clave elector, domicilio..."
+        placeholder="Buscar por nombre, CURP, clave elector, folio..."
         oninput="page=1;renderTable()">
-
-      <!-- RF-06: filtro por estado -->
-      <input type="text" id="filterEstado"
-        placeholder="Filtrar por estado"
-        oninput="page=1;renderTable()"
-        style="flex:1; min-width:120px;">
-
-      <!-- RF-06: filtro por sección (solo numérico) -->
-      <input type="text" id="filterSeccion"
-        placeholder="Sección (ej: 1234)"
-        oninput="page=1;renderTable()"
-        maxlength="4"
-        style="flex:0 0 140px; min-width:100px;">
-
-      <!-- Filtro sexo -->
+      <input type="text" id="filterEstado" placeholder="Filtrar por estado"
+        oninput="page=1;renderTable()" style="flex:1;min-width:120px;">
+      <input type="text" id="filterSeccion" placeholder="Sección (4 dígitos)"
+        oninput="page=1;renderTable()" maxlength="4" style="flex:0 0 140px;min-width:100px;">
       <select id="filterSexo" onchange="page=1;renderTable()">
         <option value="">Todos (sexo)</option>
         <option value="H">Hombre</option>
         <option value="M">Mujer</option>
       </select>
-
-      <!-- RF-04: filtro por estado de revisión -->
       <select id="filterRevision" onchange="page=1;renderTable()">
         <option value="">Todos (revisión)</option>
         <option value="1">⚠ Requiere revisión</option>
@@ -244,7 +320,6 @@
       </select>
     </div>
 
-    <!-- RF-08: Tabla con columna de confianza y botón Ver con imagen -->
     <div class="table-wrap">
       <table id="recordsTable">
         <thead>
@@ -253,36 +328,37 @@
             <th>Nombre completo</th>
             <th>CURP</th>
             <th>Clave Elector</th>
-            <th>Sección</th><!-- RF-06 -->
-            <th>Estado</th><!-- RF-06 -->
+            <th>Folio</th>
+            <th>Sección</th>
+            <th>Estado</th>
             <th>Sexo</th>
             <th>Registrado</th>
-            <th>Confianza</th><!-- RF-04 -->
+            <th>Confianza</th>
             <th>Acciones</th>
           </tr>
         </thead>
         <tbody id="tableBody"></tbody>
       </table>
       <div id="tableEmpty" class="empty-state" style="display:none">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/>
+          <polyline points="13 2 13 9 20 9"/>
+        </svg>
         <p>No hay registros que coincidan con los filtros.</p>
       </div>
     </div>
     <div class="pager" id="pager"></div>
-
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════
-     RF-08: MODAL CON IMAGEN + DATOS
-═══════════════════════════════════════ -->
+
+<!-- MODAL DETALLE (RF-08: ambas imágenes) -->
 <div class="modal-overlay" id="detailModal">
-  <div class="modal">
+  <div class="modal" style="max-width:700px;">
     <div class="flex items-center justify-between mb-2">
-      <h3>Detalle del registro <span class="enc-pill"> encriptado</span></h3>
+      <h3>Detalle del registro <span class="enc-pill">🔒 encriptado</span></h3>
       <button class="modal-close" onclick="closeModal('detailModal')">✕</button>
     </div>
-    <!-- Imagen + datos se inyectan por JS (viewRecord) -->
     <div id="modalContent"></div>
     <div class="btn-group mt-2">
       <button class="btn btn-danger btn-sm" id="modalDeleteBtn">Eliminar registro</button>
@@ -291,13 +367,12 @@
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════
-     CONFIG MODAL
-═══════════════════════════════════════ -->
+
+<!-- CONFIG MODAL -->
 <div class="modal-overlay" id="configModal">
   <div class="modal" style="max-width:480px;">
     <div class="flex items-center justify-between mb-2">
-      <h3> Configuración Admin</h3>
+      <h3>⚙️ Configuración Admin</h3>
       <button class="modal-close" onclick="closeModal('configModal')">✕</button>
     </div>
     <div class="field mb-2">
